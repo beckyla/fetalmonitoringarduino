@@ -2,7 +2,6 @@
 #include <ArduinoBLE.h> //Include the ArduinoBLE library
 #include <SPI.h> //Include the SPI library 
 //#include "ADAS1000.h" //include ADAS100 library 
-#define RSSI_REASONABLE_SIGNAL -113
 
 /*FETAL KICK VARIABLES*/
 /*
@@ -28,8 +27,9 @@ int ONBOARD_LED = 13;
 int button_pin = 10;
 int button_value = 0;
 int lastBtnPressMillis = 0;
-int advertising = 0;
 int interval = 3000; //3 seconds 
+int bluetoothState = 0;
+
 // Declare interval time 
 
 /*BLE CONNECTION VARIABLES*/
@@ -38,20 +38,6 @@ BLEService monitoringService("19B10000-E8F2-537E-4F6C-D104768A1214"); //Temporar
 // Create the BLECharacteristics
 BLECharacteristic fetalKickChar("19B10000-E8F2-537E-4F6C-D104768A1216", BLERead, 2); //Temprary UUID
 BLECharacteristic fetalECGChar("19B10000-E8F2-537E-4F6C-D104768A1218", BLERead, 2); //Temporary UUID
-
-void blePeripheralDisconnectHandler(BLEDevice central) {
-  // central disconnected event handler
-  Serial.print("Disconnected event, central: ");
-  Serial.println(central.address());
-
-  //Reset fetal kick count
-  fetalkick_count = 0;
-  
-  //Turn off on-board LED to indicate disconnection
-  digitalWrite(ONBOARD_LED, LOW);
-  
-  BLE.disconnect();    
-}
 
 void setup() {
   /*SERIAL MONITOR*/
@@ -94,10 +80,13 @@ void setup() {
   BLE.setAdvertisingInterval(200); //Set an advertising interval
   //Intervals of 0.625ms
 
+  BLE.setEventHandler(BLEConnected, blePeripheralConnectHandler);
   BLE.setEventHandler(BLEDisconnected, blePeripheralDisconnectHandler);
 }
 
 void loop() {
+  BLE.poll(); 
+  
   // Read the state of button
   button_value = digitalRead(button_pin); 
 
@@ -107,84 +96,33 @@ void loop() {
 
   // Check button has been pressed for longer than interval
   if (millis() - lastBtnPressMillis >= interval) {
-    
-    // Turn LED on to indicate bluetooth on 
-    digitalWrite(LED_pin, HIGH);
-    delay(1000); // Delay between LED turning on for stability
 
-    // Set advertising state 
-    advertising = BLE.advertise(); //Advertise the BLE device
-           
-    while (advertising){  
-      //Print to serial that Bluetooth device is active and waiting for connections 
+    if (!bluetoothState){
+      bluetoothState = ~bluetoothState;
+      
+      // Turn LED on to indicate bluetooth on 
+      digitalWrite(LED_pin, HIGH);
+      delay(1000); // Delay between LED turning on for stability
+  
+      // Set advertising state 
+      BLE.advertise(); //Advertise the BLE device
+      
       Serial.println("Bluetooth device active, waiting for connections...");
+    }else{
+      bluetoothState = ~bluetoothState;
+      
+      //Stop advertising
+      BLE.stopAdvertise();
+        
+      //Turn LED off to indicate bluetooth off
+      digitalWrite(LED_pin, LOW);
+        
+      delay(1000); // Delay between LED turning on for stability
+      Serial.println("Turn bluetooth off...");
+    }     
+  }  
 
-      // Read the state of button
-      button_value = digitalRead(button_pin); 
-      
-      if (button_value == HIGH) {    // assumes btn is LOW when pressed
-        lastBtnPressMillis = millis();   // btn not pressed so reset clock
-      }
-  
-      // Check button has been pressed for longer than interval
-      if (millis() - lastBtnPressMillis >= interval) {
-        //Stop advertising
-        BLE.stopAdvertise();
-        advertising = 0; //reset advertsing state 
-        
-        //Turn LED off to indicate bluetooth off
-        digitalWrite(LED_pin, LOW);
-        
-        delay(1000); // Delay between LED turning on for stability
-      }
-      
-      /*BLE CONNECTION*/
-      BLEDevice central = BLE.central(); //Listen for BLE peripherals to connect 
-   
-      //Check the BLE device is connected to central
-      if(central){ 
-        //Stop advertising
-        BLE.stopAdvertise();
-        advertising = 0; //reset advertsing state 
-               
-        //Print to serial that BLE device is connected to central
-        Serial.print("Connected to central: ");
-        Serial.println(central.address()); 
-            
-        //Turn on on-board LED to idicate connection 
-        digitalWrite(ONBOARD_LED, HIGH);
-        
-        while(central.connected()){
-          BLE.poll();
-          if (central.rssi() >= RSSI_REASONABLE_SIGNAL) {
-            //Send data to central
-            fetalKickChar.writeValue((byte)fetalkick_count);
-            //Serial.print("Fetal Kick Count Send: ");
-            //Serial.println(fetalkick_count);  
-          }else{
-            BLE.disconnect(); 
-          }           
-        }
-        //Reset fetal kick count
-        //fetalkick_count = 0;
-        
-        //Turn off on-board LED to indicate disconnection
-        //digitalWrite(ONBOARD_LED, LOW);
-      
-        //Print to serial that BLE device has disconnected to central
-        //Serial.print("Disconnected from central: ");
-        //Serial.println(central.address());
-          
-        //BLE.disconnect();    
-     }  
-   }  
-    // Prints title with ending line break
-    Serial.println("BLE end");
-  }
-  
-  //Turn LED off
-  digitalWrite(LED_pin, LOW);
-
+  if(!bluetoothState){
   /* PIEZO ELECTRIC SENSORS */
   long currentPiezoSensorMillis = millis();
   
@@ -213,6 +151,48 @@ void loop() {
       digitalWrite(pLED_pin, LOW);
     }
   }
+ }
+}
+
+void blePeripheralConnectHandler(BLEDevice central) {
+  Serial.println("Connected event, central: ");
+  Serial.println(central.address());
+
+  //Stop advertising
+  BLE.stopAdvertise();
+  
+  //Turn on on-board LED to idicate connection 
+  digitalWrite(ONBOARD_LED, HIGH);
+       
+  //Send data to central
+  fetalKickChar.writeValue((byte)fetalkick_count);
+  Serial.print("Fetal Kick Count Send: ");
+  Serial.println(fetalkick_count);  
+}
+
+void blePeripheralDisconnectHandler(BLEDevice central) {
+  // central disconnected event handler
+  Serial.print("Disconnected event, central: ");
+  Serial.println(central.address());
+
+  //Reset fetal kick count
+  fetalkick_count = 0;
+
+  //Reset bluetooth state 
+  bluetoothState = ~bluetoothState;
+  
+  //Turn off on-board LED to indicate disconnection
+  digitalWrite(ONBOARD_LED, LOW);
+  
+  BLE.disconnect();
+
+  //Turn LED off to indicate bluetooth off
+  digitalWrite(LED_pin, LOW);
+        
+  delay(1000); // Delay between LED turning on for stability
+  
+  // Prints title with ending line break
+  Serial.println("BLE end");    
 }
 
 //void updateSensors() {
