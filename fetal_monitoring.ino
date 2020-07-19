@@ -1,7 +1,7 @@
 /*INCLUDE LIBRARIES*/
 #include <ArduinoBLE.h> //Include the ArduinoBLE library
 #include <SPI.h> //Include the SPI library 
-//#include "ADAS1000.h" //include ADAS100 library 
+#include "ADAS1000.h" //include ADAS100 library 
 
 /*FETAL KICK VARIABLES*/
 /*
